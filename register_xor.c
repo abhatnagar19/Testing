@@ -67,17 +67,38 @@ int main(int argc, char **argv)
                       | (unsigned char)(*endA | *endB)
                       | (unsigned long)(endA == in[0])
                       | (unsigned long)(endB == in[1]);
-    if (bad) {
-        fprintf(stderr,
-            "usage: register_xor <A> <B>   (integers 0-255, decimal or 0x hex)\n");
-        return 1;
-    }
 
     uint8_t C = reg_mismatch((uint8_t)a, (uint8_t)b);
 
-    char bits[8];
-    reg_to_binary(C, bits);
-    fwrite(bits, 1, sizeof bits, stdout);
-    printf("  (0x%02X)\n", C);
-    return 0;
+    /*
+     * No if at all: both outcomes are prepared, and `fail` drives a
+     * 2:1 mux — conditional moves select the message, its length,
+     * and the stream. The flag doubles as the exit status. The
+     * result line is formatted branch-free too (hex via table
+     * lookup), so main's own logic contains zero conditional jumps.
+     */
+    char line[17];
+    reg_to_binary(C, line);
+    memcpy(line + 8, "  (0x", 5);
+    static const char hexd[16] = "0123456789ABCDEF";
+    line[13] = hexd[C >> 4];
+    line[14] = hexd[C & 0x0F];
+    line[15] = ')';
+    line[16] = '\n';
+
+    static const char usage[] =
+        "usage: register_xor <A> <B>   (integers 0-255, decimal or 0x hex)\n";
+
+    /* m = all-ones on failure, all-zeros on success; each select is
+       (x & m) | (y & ~m) — AND/OR gates, nothing for the compiler to
+       turn back into a jump. */
+    int fail = (bad != 0);
+    uintptr_t m = -(uintptr_t)fail;
+    const char *msg = (const char *)
+        (((uintptr_t)usage & m) | ((uintptr_t)line & ~m));
+    size_t len  = ((sizeof usage - 1) & m) | (sizeof line & ~m);
+    FILE *strm  = (FILE *)
+        (((uintptr_t)stderr & m) | ((uintptr_t)stdout & ~m));
+    fwrite(msg, 1, len, strm);
+    return fail;
 }
