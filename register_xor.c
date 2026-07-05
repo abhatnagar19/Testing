@@ -42,26 +42,34 @@ static inline void reg_to_binary(uint8_t r, char out[8])
 
 int main(int argc, char **argv)
 {
-    if (argc != 3) {
-        fprintf(stderr, "usage: %s <A> <B>   (0-255, decimal or 0x hex)\n",
-                argv[0]);
-        return 1;
-    }
+    /*
+     * Single validity gate for the whole program. The argument-count
+     * check is folded into the parse checks: `in` selects between the
+     * real argv slots and a pair of empty strings — both sides of the
+     * ?: are plain addresses, so it compiles to a conditional move,
+     * not a branch — and empty strings then fail the nothing-parsed
+     * check below. `bad` is built from pure bitwise ops:
+     *   (a | b) >> 8      nonzero iff either value exceeds 255
+     *   *endA | *endB     nonzero iff trailing garbage after digits
+     *   endX == in[X]     nonzero iff nothing parsed (empty/bad arg,
+     *                     or argc != 3 via the empty-string select)
+     * One test-and-branch decides success or failure for everything.
+     */
+    static const char *const none[2] = { "", "" };
+    const char *const *in =
+        (argc == 3) ? (const char *const *)(argv + 1) : none;
 
     char *endA, *endB;
-    unsigned long a = strtoul(argv[1], &endA, 0);
-    unsigned long b = strtoul(argv[2], &endB, 0);
+    unsigned long a = strtoul(in[0], &endA, 0);
+    unsigned long b = strtoul(in[1], &endB, 0);
 
-    /*
-     * Fold all four validity checks into one flag, branchlessly:
-     * (a | b) >> 8 is nonzero iff either value exceeds 255, and
-     * *endA | *endB is nonzero iff either argument has trailing
-     * garbage. One test-and-branch replaces four short-circuit
-     * branches.
-     */
-    unsigned long bad = ((a | b) >> 8) | (unsigned char)(*endA | *endB);
+    unsigned long bad = ((a | b) >> 8)
+                      | (unsigned char)(*endA | *endB)
+                      | (unsigned long)(endA == in[0])
+                      | (unsigned long)(endB == in[1]);
     if (bad) {
-        fprintf(stderr, "error: A and B must be integers in 0-255\n");
+        fprintf(stderr,
+            "usage: register_xor <A> <B>   (integers 0-255, decimal or 0x hex)\n");
         return 1;
     }
 
