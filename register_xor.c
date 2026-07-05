@@ -51,7 +51,16 @@ int main(int argc, char **argv)
     char *endA, *endB;
     unsigned long a = strtoul(argv[1], &endA, 0);
     unsigned long b = strtoul(argv[2], &endB, 0);
-    if (*endA != '\0' || *endB != '\0' || a > 0xFFu || b > 0xFFu) {
+
+    /*
+     * Fold all four validity checks into one flag, branchlessly:
+     * (a | b) >> 8 is nonzero iff either value exceeds 255, and
+     * *endA | *endB is nonzero iff either argument has trailing
+     * garbage. One test-and-branch replaces four short-circuit
+     * branches.
+     */
+    unsigned long bad = ((a | b) >> 8) | (unsigned char)(*endA | *endB);
+    if (bad) {
         fprintf(stderr, "error: A and B must be integers in 0-255\n");
         return 1;
     }
