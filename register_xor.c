@@ -12,10 +12,32 @@
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 
 static inline uint8_t reg_mismatch(uint8_t A, uint8_t B)
 {
     return A ^ B;
+}
+
+/*
+ * Render all 8 bits of r as ASCII '0'/'1' at once, MSB first —
+ * branchless, loop-free, ~6 ALU instructions:
+ *   1. replicate r into all 8 bytes of a 64-bit word,
+ *   2. mask a different bit in each byte (byte written first tests b7),
+ *   3. collapse each byte to 0/1: nonzero + 0x7F carries into bit 7,
+ *   4. OR with '0' (0x30) to get ASCII.
+ */
+static inline void reg_to_binary(uint8_t r, char out[8])
+{
+#if defined(__BYTE_ORDER__) && __BYTE_ORDER__ == __ORDER_BIG_ENDIAN__
+    const uint64_t sel = 0x8040201008040201ULL;
+#else
+    const uint64_t sel = 0x0102040810204080ULL;
+#endif
+    uint64_t t = (r * 0x0101010101010101ULL) & sel;
+    t = ((t + 0x7F7F7F7F7F7F7F7FULL) >> 7) & 0x0101010101010101ULL;
+    t |= 0x3030303030303030ULL;
+    memcpy(out, &t, 8);
 }
 
 int main(int argc, char **argv)
@@ -36,8 +58,9 @@ int main(int argc, char **argv)
 
     uint8_t C = reg_mismatch((uint8_t)a, (uint8_t)b);
 
-    for (int i = 7; i >= 0; i--)
-        putchar('0' + ((C >> i) & 1));
+    char bits[8];
+    reg_to_binary(C, bits);
+    fwrite(bits, 1, sizeof bits, stdout);
     printf("  (0x%02X)\n", C);
     return 0;
 }
