@@ -1,0 +1,1126 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Nifty Lens — NSE/BSE Tracker</title>
+<style>
+:root {
+  color-scheme: light;
+  --page: #f9f9f7;
+  --surface-1: #fcfcfb;
+  --ink: #0b0b0b;
+  --ink-2: #52514e;
+  --muted: #898781;
+  --grid: #e1e0d9;
+  --axis: #c3c2b7;
+  --border: rgba(11,11,11,0.10);
+  --s1: #2a78d6;          /* price series */
+  --s1-soft: #86b6ef;     /* de-emphasis blue (sparklines) */
+  --s2: #eb6834;          /* projection series */
+  --up: #006300;
+  --down: #d03b3b;
+  --warn: #fab219;
+}
+@media (prefers-color-scheme: dark) {
+  :root:where(:not([data-theme="light"])) {
+    color-scheme: dark;
+    --page: #0d0d0d;
+    --surface-1: #1a1a19;
+    --ink: #ffffff;
+    --ink-2: #c3c2b7;
+    --muted: #898781;
+    --grid: #2c2c2a;
+    --axis: #383835;
+    --border: rgba(255,255,255,0.10);
+    --s1: #3987e5;
+    --s1-soft: #1c5cab;
+    --s2: #d95926;
+    --up: #0ca30c;
+    --down: #d03b3b;
+  }
+}
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --page: #0d0d0d;
+  --surface-1: #1a1a19;
+  --ink: #ffffff;
+  --ink-2: #c3c2b7;
+  --muted: #898781;
+  --grid: #2c2c2a;
+  --axis: #383835;
+  --border: rgba(255,255,255,0.10);
+  --s1: #3987e5;
+  --s1-soft: #1c5cab;
+  --s2: #d95926;
+  --up: #0ca30c;
+  --down: #d03b3b;
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+html, body { background: var(--page); color: var(--ink); }
+body {
+  font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+  font-size: 14px;
+  line-height: 1.45;
+}
+button { font: inherit; color: inherit; background: none; border: none; cursor: pointer; }
+input, select { font: inherit; color: var(--ink); }
+
+.wrap { max-width: 1180px; margin: 0 auto; padding: 0 20px 48px; }
+
+header.topbar {
+  position: sticky; top: 0; z-index: 20;
+  background: color-mix(in srgb, var(--page) 88%, transparent);
+  backdrop-filter: blur(8px);
+  border-bottom: 1px solid var(--border);
+}
+.topbar-inner {
+  max-width: 1180px; margin: 0 auto; padding: 12px 20px;
+  display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
+}
+.brand { font-weight: 700; font-size: 17px; letter-spacing: -0.01em; }
+.brand span { color: var(--s1); }
+.pill {
+  display: inline-flex; align-items: center; gap: 6px;
+  border: 1px solid var(--border); border-radius: 999px;
+  padding: 3px 10px; font-size: 12px; color: var(--ink-2);
+  background: var(--surface-1);
+}
+.pill .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--muted); }
+.pill.open .dot { background: var(--up); }
+.pill.live .dot { background: var(--up); }
+.pill.demo .dot { background: var(--warn); }
+.pill button { text-decoration: underline; color: var(--ink-2); font-size: 12px; }
+.spacer { flex: 1; }
+.icon-btn {
+  border: 1px solid var(--border); border-radius: 8px; background: var(--surface-1);
+  padding: 5px 10px; font-size: 12px; color: var(--ink-2);
+}
+.icon-btn:hover { color: var(--ink); }
+
+.card {
+  background: var(--surface-1);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  padding: 20px;
+  margin-top: 18px;
+}
+
+/* ---------- hero ---------- */
+.hero { display: grid; grid-template-columns: 1.4fr 1fr; gap: 18px; margin-top: 18px; }
+@media (max-width: 800px) { .hero { grid-template-columns: 1fr; } }
+.hero .card { margin-top: 0; }
+.inst-head { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
+.inst-name { font-size: 18px; font-weight: 650; }
+.tag {
+  font-size: 11px; font-weight: 600; letter-spacing: 0.04em;
+  color: var(--ink-2); border: 1px solid var(--border);
+  border-radius: 6px; padding: 1px 7px;
+}
+.hero-price {
+  font-size: 52px; font-weight: 650; letter-spacing: -0.02em;
+  margin-top: 8px; line-height: 1.1;
+}
+.delta { font-size: 16px; font-weight: 600; margin-top: 2px; }
+.delta.up { color: var(--up); }
+.delta.down { color: var(--down); }
+.meta-row { display: flex; gap: 22px; flex-wrap: wrap; margin-top: 16px; }
+.meta-row .m label { display: block; font-size: 11px; color: var(--muted); }
+.meta-row .m b { font-weight: 600; font-size: 13px; font-variant-numeric: tabular-nums; }
+
+.predict-card { display: flex; flex-direction: column; }
+.predict-label { font-size: 12px; color: var(--muted); }
+.predict-value { font-size: 40px; font-weight: 650; letter-spacing: -0.02em; margin-top: 6px; line-height: 1.1; }
+.predict-range { font-size: 13px; color: var(--ink-2); margin-top: 2px; font-variant-numeric: tabular-nums; }
+.predict-chip {
+  display: inline-flex; align-items: center; gap: 6px; align-self: flex-start;
+  margin-top: 12px; padding: 4px 12px; border-radius: 999px;
+  font-size: 13px; font-weight: 600; border: 1px solid var(--border);
+}
+.predict-chip.up { color: var(--up); }
+.predict-chip.down { color: var(--down); }
+.predict-chip.flat { color: var(--ink-2); }
+.predict-note { font-size: 12px; color: var(--muted); margin-top: 12px; }
+.linkish { color: var(--s1); text-decoration: underline; font-size: 12px; padding: 0; }
+.predict-basis { margin-top: auto; padding-top: 14px; }
+
+/* ---------- chart ---------- */
+.legend { display: flex; gap: 18px; align-items: center; flex-wrap: wrap; margin-bottom: 10px; }
+.legend .k { display: inline-flex; align-items: center; gap: 7px; font-size: 12px; color: var(--ink-2); }
+.legend .swatch { width: 16px; height: 0; border-top: 2px solid var(--s1); border-radius: 2px; }
+.legend .swatch.proj { border-top-style: dashed; border-top-color: var(--s2); }
+.legend .swatch.band { width: 14px; height: 10px; border: none; border-radius: 3px; background: color-mix(in srgb, var(--s2) 14%, transparent); }
+.chart-box { position: relative; }
+.chart-box svg { display: block; width: 100%; height: auto; }
+.tooltip {
+  position: absolute; pointer-events: none; display: none;
+  background: var(--surface-1); border: 1px solid var(--border); border-radius: 8px;
+  padding: 7px 10px; font-size: 12px; box-shadow: 0 4px 14px rgba(0,0,0,0.12);
+  white-space: nowrap; z-index: 5;
+}
+.tooltip .t { color: var(--muted); }
+.tooltip .v { font-weight: 650; font-variant-numeric: tabular-nums; }
+.tooltip .d { font-variant-numeric: tabular-nums; }
+
+/* ---------- deep dive ---------- */
+details.deep { margin-top: 18px; }
+details.deep > summary {
+  list-style: none; cursor: pointer;
+  display: flex; align-items: center; gap: 8px;
+  background: var(--surface-1); border: 1px solid var(--border);
+  border-radius: 14px; padding: 14px 20px; font-weight: 600; font-size: 14px;
+}
+details.deep > summary::-webkit-details-marker { display: none; }
+details.deep > summary .chev { transition: transform .15s; color: var(--muted); }
+details.deep[open] > summary { border-bottom-left-radius: 0; border-bottom-right-radius: 0; }
+details.deep[open] > summary .chev { transform: rotate(90deg); }
+details.deep > summary .sub { font-weight: 400; color: var(--muted); font-size: 12px; }
+.deep-body {
+  border: 1px solid var(--border); border-top: none;
+  border-radius: 0 0 14px 14px; background: var(--surface-1); padding: 20px;
+}
+.tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 14px; }
+.tile { border: 1px solid var(--border); border-radius: 12px; padding: 14px 16px; }
+.tile h4 { font-size: 12px; font-weight: 650; color: var(--ink-2); text-transform: uppercase; letter-spacing: 0.05em; }
+.tile h4 .tag { margin-left: 6px; text-transform: none; letter-spacing: 0; font-weight: 500; }
+.kv { display: flex; justify-content: space-between; gap: 10px; margin-top: 8px; font-size: 13px; }
+.kv label { color: var(--muted); }
+.kv b { font-weight: 600; font-variant-numeric: tabular-nums; text-align: right; }
+.contrib { margin-top: 16px; }
+.contrib h4 { font-size: 12px; font-weight: 650; color: var(--ink-2); text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 10px; }
+.contrib-row { display: grid; grid-template-columns: 130px 1fr 80px; align-items: center; gap: 10px; margin-top: 6px; font-size: 12px; }
+.contrib-row label { color: var(--ink-2); }
+.contrib-row .val { text-align: right; font-variant-numeric: tabular-nums; font-weight: 600; }
+.contrib-track { position: relative; height: 12px; }
+.contrib-track .zero { position: absolute; left: 50%; top: -2px; bottom: -2px; width: 1px; background: var(--axis); }
+.contrib-track .bar { position: absolute; top: 1px; height: 10px; }
+.contrib-track .bar.pos { background: var(--up); border-radius: 0 4px 4px 0; }
+.contrib-track .bar.neg { background: var(--down); border-radius: 4px 0 0 4px; }
+.method { margin-top: 16px; font-size: 12.5px; color: var(--ink-2); max-width: 72ch; }
+.method b { color: var(--ink); }
+
+/* ---------- table ---------- */
+.table-controls { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin-bottom: 14px; }
+.table-controls input[type="search"] {
+  flex: 1; min-width: 200px; max-width: 360px;
+  background: var(--page); border: 1px solid var(--border); border-radius: 8px;
+  padding: 7px 12px;
+}
+.table-controls select {
+  background: var(--page); border: 1px solid var(--border); border-radius: 8px; padding: 7px 8px;
+}
+.hint { font-size: 12px; color: var(--muted); }
+.tbl-scroll { overflow-x: auto; }
+table.tbl { width: 100%; border-collapse: collapse; min-width: 720px; }
+.tbl th {
+  text-align: right; font-size: 11px; font-weight: 600; color: var(--muted);
+  text-transform: uppercase; letter-spacing: 0.05em;
+  padding: 6px 10px; border-bottom: 1px solid var(--grid); white-space: nowrap;
+}
+.tbl th:first-child { text-align: left; }
+.tbl th.sortable { cursor: pointer; }
+.tbl th.sortable:hover { color: var(--ink); }
+.tbl td {
+  padding: 9px 10px; border-bottom: 1px solid var(--grid);
+  text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap;
+}
+.tbl td:first-child { text-align: left; }
+.tbl tbody tr { cursor: pointer; }
+.tbl tbody tr:hover { background: color-mix(in srgb, var(--s1) 6%, transparent); }
+.tbl tbody tr.sel { background: color-mix(in srgb, var(--s1) 10%, transparent); }
+.tbl .sym { font-weight: 650; }
+.tbl .nm { display: block; font-size: 11px; color: var(--muted); font-weight: 400; }
+.tbl .up { color: var(--up); font-weight: 600; }
+.tbl .down { color: var(--down); font-weight: 600; }
+.tbl .srcflag { font-size: 10px; color: var(--muted); border: 1px solid var(--border); border-radius: 5px; padding: 0 5px; margin-left: 6px; font-weight: 400; }
+
+footer.foot { margin-top: 28px; font-size: 12px; color: var(--muted); max-width: 80ch; }
+.sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
+</style>
+</head>
+<body>
+
+<header class="topbar">
+  <div class="topbar-inner">
+    <div class="brand">Nifty <span>Lens</span></div>
+    <span id="marketPill" class="pill"><span class="dot"></span><span id="marketPillText">—</span></span>
+    <span id="sourcePill" class="pill demo" title="Where prices come from">
+      <span class="dot"></span><span id="sourcePillText">Demo data</span>
+      <button id="retryLive" type="button" hidden>retry live</button>
+    </span>
+    <div class="spacer"></div>
+    <span class="hint" id="updatedAt"></span>
+    <button class="icon-btn" id="themeBtn" type="button" title="Toggle theme">Theme: auto</button>
+  </div>
+</header>
+
+<div class="wrap">
+
+  <section class="hero" aria-label="Selected instrument">
+    <div class="card">
+      <div class="inst-head">
+        <span class="inst-name" id="instName">NIFTY 50</span>
+        <span class="tag" id="instExch">NSE · INDEX</span>
+        <span class="tag" id="instSector" hidden></span>
+      </div>
+      <div class="hero-price" id="instPrice">—</div>
+      <div class="delta" id="instDelta">—</div>
+      <div class="meta-row">
+        <div class="m"><label>Prev close</label><b id="mPrev">—</b></div>
+        <div class="m"><label>Open</label><b id="mOpen">—</b></div>
+        <div class="m"><label>Day range</label><b id="mRange">—</b></div>
+        <div class="m"><label>VWAP</label><b id="mVwap">—</b></div>
+      </div>
+    </div>
+
+    <div class="card predict-card">
+      <span class="predict-label" id="predictLabel">Expected close today</span>
+      <div class="predict-value" id="predictValue">—</div>
+      <div class="predict-range" id="predictRange">—</div>
+      <span class="predict-chip flat" id="predictChip">—</span>
+      <div class="predict-note" id="predictNote">Blends price momentum, futures positioning and options activity into one number — so you don’t have to read an option chain.</div>
+      <div class="predict-basis"><button class="linkish" id="openDeep" type="button">How is this computed? Deep dive ↓</button></div>
+    </div>
+  </section>
+
+  <section class="card" aria-label="Intraday chart">
+    <div class="legend" id="chartLegend">
+      <span class="k"><span class="swatch"></span>Price</span>
+      <span class="k"><span class="swatch proj"></span>Projected path</span>
+      <span class="k"><span class="swatch band"></span>Likely range (≈68%)</span>
+    </div>
+    <div class="chart-box" id="chartBox">
+      <svg id="chart" role="img" aria-label="Intraday price chart with projected close"></svg>
+      <div class="tooltip" id="chartTip"></div>
+    </div>
+  </section>
+
+  <details class="deep" id="deepDive">
+    <summary>
+      <span class="chev">▶</span> Deep dive
+      <span class="sub">— futures, options and how the expected close is built</span>
+    </summary>
+    <div class="deep-body">
+      <div class="tiles" id="deepTiles"></div>
+      <div class="contrib" id="contrib"></div>
+      <div class="method" id="method"></div>
+    </div>
+  </details>
+
+  <section class="card" aria-label="Stocks">
+    <div class="table-controls">
+      <input type="search" id="search" placeholder="Filter Nifty 50, or type any symbol (e.g. TATAPOWER, SENSEX) and press Enter" aria-label="Search stocks">
+      <select id="exchSel" aria-label="Exchange for symbol lookup">
+        <option value="NSE" selected>NSE</option>
+        <option value="BSE">BSE</option>
+      </select>
+      <span class="hint">Click a row to track it. Sorted by index weight.</span>
+    </div>
+    <div class="tbl-scroll">
+      <table class="tbl" id="tbl">
+        <thead>
+          <tr>
+            <th>Stock</th>
+            <th class="sortable" data-sort="price">LTP ₹</th>
+            <th class="sortable" data-sort="chg">Change</th>
+            <th>Trend</th>
+            <th class="sortable" data-sort="exp">Expected close</th>
+            <th class="sortable" data-sort="expd">To expected</th>
+          </tr>
+        </thead>
+        <tbody id="tblBody"></tbody>
+      </table>
+    </div>
+  </section>
+
+  <footer class="foot">
+    <p><b>Not investment advice.</b> The expected close is a statistical estimate built from price momentum, futures basis and options open-interest patterns; markets routinely move outside the shown range. In demo mode all prices are simulated. Futures and options figures are modeled — exchanges do not offer a free browser-accessible derivatives feed.</p>
+  </footer>
+</div>
+
+<script>
+"use strict";
+
+/* ================= constants ================= */
+
+const NIFTY50 = [
+  ["HDFCBANK","HDFC Bank","Financials",13.2,1985,1.3],
+  ["RELIANCE","Reliance Industries","Energy",9.2,1425,1.4],
+  ["ICICIBANK","ICICI Bank","Financials",8.9,1445,1.3],
+  ["INFY","Infosys","IT",5.1,1545,1.5],
+  ["BHARTIARTL","Bharti Airtel","Telecom",4.6,2045,1.3],
+  ["LT","Larsen & Toubro","Industrials",4.0,3890,1.4],
+  ["TCS","Tata Consultancy Services","IT",3.9,3055,1.3],
+  ["ITC","ITC","FMCG",3.4,415,1.2],
+  ["AXISBANK","Axis Bank","Financials",3.1,1195,1.5],
+  ["SBIN","State Bank of India","Financials",3.1,945,1.5],
+  ["M&M","Mahindra & Mahindra","Auto",2.7,3420,1.6],
+  ["KOTAKBANK","Kotak Mahindra Bank","Financials",2.6,2150,1.4],
+  ["BAJFINANCE","Bajaj Finance","Financials",2.4,1045,1.7],
+  ["HINDUNILVR","Hindustan Unilever","FMCG",1.9,2385,1.2],
+  ["NTPC","NTPC","Utilities",1.6,345,1.3],
+  ["SUNPHARMA","Sun Pharma","Pharma",1.6,1745,1.3],
+  ["HCLTECH","HCL Technologies","IT",1.5,1555,1.5],
+  ["MARUTI","Maruti Suzuki","Auto",1.5,16150,1.4],
+  ["TATAMOTORS","Tata Motors","Auto",1.4,745,1.9],
+  ["TITAN","Titan Company","Consumer",1.3,3610,1.4],
+  ["ULTRACEMCO","UltraTech Cement","Materials",1.3,11850,1.4],
+  ["POWERGRID","Power Grid Corp","Utilities",1.2,295,1.2],
+  ["TATASTEEL","Tata Steel","Metals",1.1,165,1.9],
+  ["BAJAJFINSV","Bajaj Finserv","Financials",1.1,2010,1.6],
+  ["ASIANPAINT","Asian Paints","Consumer",1.0,2455,1.4],
+  ["ADANIPORTS","Adani Ports","Infrastructure",1.0,1420,1.9],
+  ["COALINDIA","Coal India","Metals",1.0,395,1.5],
+  ["GRASIM","Grasim Industries","Materials",0.9,2760,1.4],
+  ["BEL","Bharat Electronics","Industrials",0.9,415,1.8],
+  ["ONGC","ONGC","Energy",0.9,245,1.6],
+  ["TECHM","Tech Mahindra","IT",0.9,1520,1.6],
+  ["HINDALCO","Hindalco Industries","Metals",0.9,695,1.8],
+  ["JSWSTEEL","JSW Steel","Metals",0.8,1055,1.7],
+  ["NESTLEIND","Nestlé India","FMCG",0.8,1185,1.2],
+  ["TRENT","Trent","Consumer",0.8,5150,2.2],
+  ["ADANIENT","Adani Enterprises","Infrastructure",0.8,2340,2.2],
+  ["JIOFIN","Jio Financial Services","Financials",0.8,315,1.9],
+  ["WIPRO","Wipro","IT",0.7,245,1.5],
+  ["CIPLA","Cipla","Pharma",0.7,1495,1.3],
+  ["DRREDDY","Dr. Reddy's Labs","Pharma",0.7,1275,1.4],
+  ["SHRIRAMFIN","Shriram Finance","Financials",0.7,625,1.8],
+  ["TATACONSUM","Tata Consumer Products","FMCG",0.7,1105,1.4],
+  ["BAJAJ-AUTO","Bajaj Auto","Auto",0.7,8850,1.5],
+  ["EICHERMOT","Eicher Motors","Auto",0.7,5650,1.5],
+  ["HDFCLIFE","HDFC Life Insurance","Financials",0.6,745,1.5],
+  ["SBILIFE","SBI Life Insurance","Financials",0.6,1815,1.4],
+  ["APOLLOHOSP","Apollo Hospitals","Healthcare",0.6,7350,1.5],
+  ["HEROMOTOCO","Hero MotoCorp","Auto",0.5,4250,1.5],
+  ["ETERNAL","Eternal (Zomato)","Consumer",0.5,265,2.4],
+  ["INDUSINDBK","IndusInd Bank","Financials",0.4,815,2.0],
+].map(([sym,name,sector,weight,base,vol]) => ({sym,name,sector,weight,base,vol}));
+
+const INDEXES = {
+  "NIFTY 50": { sym:"NIFTY 50", name:"NIFTY 50", sector:"Index", base:24650, vol:0.75, yahoo:"^NSEI", exch:"NSE", isIndex:true, strikeStep:50, ivBase:12.5 },
+  "SENSEX":   { sym:"SENSEX",   name:"S&P BSE SENSEX", sector:"Index", base:80900, vol:0.75, yahoo:"^BSESN", exch:"BSE", isIndex:true, strikeStep:100, ivBase:12.5 },
+};
+
+const SESSION_OPEN  = 9*60 + 15;    // minutes since midnight IST
+const SESSION_CLOSE = 15*60 + 30;
+const SESSION_MIN   = SESSION_CLOSE - SESSION_OPEN; // 375
+const BAR_MIN = 5;
+const RISK_FREE = 0.065;
+
+const CORS_PROXIES = [
+  u => `https://api.allorigins.win/raw?url=${encodeURIComponent(u)}`,
+  u => `https://corsproxy.io/?url=${encodeURIComponent(u)}`,
+];
+
+/* ================= utils ================= */
+
+const fmtIN  = new Intl.NumberFormat("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+const fmtIN0 = new Intl.NumberFormat("en-IN", { maximumFractionDigits: 0 });
+const inr = n => fmtIN.format(n);
+const signed = (n, digits=2) => (n >= 0 ? "+" : "−") + fmtIN.format(Math.abs(n)).replace(/\.00$/, digits ? ".00" : "");
+const pct = n => (n >= 0 ? "+" : "−") + Math.abs(n).toFixed(2) + "%";
+
+function hashCode(s) {
+  let h = 2166136261;
+  for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 16777619); }
+  return h >>> 0;
+}
+function mulberry32(a) {
+  return function () {
+    a |= 0; a = (a + 0x6D2B79F5) | 0;
+    let t = Math.imul(a ^ (a >>> 15), 1 | a);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+function gauss(rng) {
+  const u = Math.max(rng(), 1e-9), v = rng();
+  return Math.sqrt(-2 * Math.log(u)) * Math.cos(2 * Math.PI * v);
+}
+
+function istNow() {
+  return new Date(new Date().toLocaleString("en-US", { timeZone: "Asia/Kolkata" }));
+}
+function isWeekday(d) { const w = d.getDay(); return w >= 1 && w <= 5; }
+function minsOfDay(d) { return d.getHours() * 60 + d.getMinutes() + d.getSeconds() / 60; }
+function dateKey(d) { return d.getFullYear() * 10000 + (d.getMonth() + 1) * 100 + d.getDate(); }
+
+/* Latest session date + live-ness. Before today's open we show the previous session in full. */
+function sessionInfo() {
+  const now = istNow();
+  let d = new Date(now);
+  let liveNow = false;
+  if (!isWeekday(d) || minsOfDay(d) < SESSION_OPEN) {
+    do { d.setDate(d.getDate() - 1); } while (!isWeekday(d));
+  } else if (minsOfDay(d) <= SESSION_CLOSE) {
+    liveNow = true;
+  }
+  const elapsed = liveNow ? Math.max(1, minsOfDay(now) - SESSION_OPEN) : SESSION_MIN;
+  return { date: d, live: liveNow, elapsedMin: elapsed, fracDone: elapsed / SESSION_MIN, now };
+}
+
+function nextExpiry(isIndex) {
+  // Index: weekly (Tuesday). Stocks: monthly (last Tuesday of the month).
+  const d = istNow();
+  const t = new Date(d);
+  if (isIndex) {
+    let add = (2 - t.getDay() + 7) % 7;
+    if (add === 0 && minsOfDay(d) > SESSION_CLOSE) add = 7;
+    t.setDate(t.getDate() + add);
+  } else {
+    const last = new Date(t.getFullYear(), t.getMonth() + 1, 0);
+    while (last.getDay() !== 2) last.setDate(last.getDate() - 1);
+    if (last < t) {
+      const nxt = new Date(t.getFullYear(), t.getMonth() + 2, 0);
+      while (nxt.getDay() !== 2) nxt.setDate(nxt.getDate() - 1);
+      return nxt;
+    }
+    return last;
+  }
+  return t;
+}
+const daysTo = d => Math.max(0.5, (d - istNow()) / 86400000);
+
+/* ================= demo simulation ================= */
+
+function simSession(inst, sess) {
+  const seed = hashCode(inst.sym + ":" + dateKey(sess.date));
+  const rng = mulberry32(seed);
+  const drift = (rng() - 0.48) * 0.012;
+  const prevClose = inst.base * (1 + (rng() - 0.5) * 0.06);
+  const dayVol = (inst.vol / 100) * (0.85 + rng() * 0.5);
+
+  const nBars = Math.max(2, Math.ceil(sess.elapsedMin / BAR_MIN) + 1);
+  const totalBars = SESSION_MIN / BAR_MIN + 1;
+  const bars = [];
+  let p = prevClose * (1 + gauss(rng) * dayVol * 0.35 + drift * 0.3); // opening gap
+  const stepVol = dayVol / Math.sqrt(totalBars);
+  let volSum = 0, pvSum = 0;
+  for (let i = 0; i < nBars && i < totalBars; i++) {
+    if (i > 0) {
+      const uShape = 1 + 0.6 * Math.abs(i / totalBars - 0.5) * 2; // busier at open/close
+      p *= 1 + gauss(rng) * stepVol * uShape + drift / totalBars;
+    }
+    const v = 1 + rng() * (1.5 - Math.abs(i / totalBars - 0.5));
+    volSum += v; pvSum += v * p;
+    bars.push({ min: SESSION_OPEN + i * BAR_MIN, price: p });
+  }
+  const last = bars[bars.length - 1].price;
+  const highs = bars.map(b => b.price);
+  return {
+    prevClose, bars, last,
+    open: bars[0].price,
+    high: Math.max(...highs), low: Math.min(...highs),
+    vwap: pvSum / volSum,
+    dayVol,
+  };
+}
+
+function simDerivatives(inst, spot, prevClose) {
+  const seed = hashCode("drv:" + inst.sym + ":" + dateKey(istNow()));
+  const rng = mulberry32(seed);
+  const isIndex = !!inst.isIndex;
+  const expiry = nextExpiry(isIndex);
+  const dte = daysTo(expiry);
+
+  const step = inst.strikeStep || niceStrikeStep(spot);
+  const atm = Math.round(spot / step) * step;
+  const ivBase = inst.ivBase || (14 + (inst.vol || 1.5) * 9);
+  const iv = ivBase * (0.92 + rng() * 0.2);
+
+  // OI clusters: calls above spot, puts below, extra OI at round strikes.
+  const strikes = [];
+  for (let k = -8; k <= 8; k++) strikes.push(atm + k * step);
+  const width = 3.2 * step;
+  let callOI = 0, putOI = 0;
+  const chain = strikes.map(K => {
+    const roundBoost = (K % (step * 5) === 0) ? 1.6 : 1;
+    const c = Math.exp(-((K - spot * 1.012) ** 2) / (2 * width * width)) * roundBoost * (0.75 + rng() * 0.5);
+    const p2 = Math.exp(-((K - spot * 0.988) ** 2) / (2 * width * width)) * roundBoost * (0.75 + rng() * 0.5);
+    callOI += c; putOI += p2;
+    return { K, c, p: p2 };
+  });
+
+  // Max pain: settlement level that minimises total option-writer payout.
+  let maxPain = atm, minPain = Infinity;
+  for (const s of strikes) {
+    let pain = 0;
+    for (const { K, c, p } of chain) pain += c * Math.max(0, s - K) + p * Math.max(0, K - s);
+    if (pain < minPain) { minPain = pain; maxPain = s; }
+  }
+
+  const pcr = putOI / callOI;
+  const fair = spot * (1 + RISK_FREE * dte / 365);
+  const futLast = fair + spot * gauss(rng) * 0.0009;
+  const straddle = 0.8 * spot * (iv / 100) * Math.sqrt(dte / 365) * 2; // ≈ ATM call + put
+  return {
+    expiry, dte, atm, step, iv, pcr, maxPain,
+    futLast, fair, basisPts: (futLast - spot) / spot * 10000,
+    straddle,
+    impliedDayMovePct: (iv / 100) / Math.sqrt(252) * 100,
+    modeled: true,
+  };
+}
+
+function niceStrikeStep(p) {
+  if (p < 100) return 2.5;
+  if (p < 250) return 5;
+  if (p < 500) return 10;
+  if (p < 1500) return 20;
+  if (p < 3000) return 50;
+  if (p < 10000) return 100;
+  return 250;
+}
+
+/* ================= prediction engine =================
+   Expected close = last price + momentum carry + VWAP pull
+                  + options gravity (max pain) + futures signal.
+   Band = option-implied 1-day move, scaled by √(session remaining). */
+
+function predictClose(inst, quote, drv, sess) {
+  const spot = quote.last;
+  const fracLeft = sess.live ? Math.max(0.02, 1 - sess.fracDone) : 1;
+  const bars = quote.bars;
+
+  // momentum: least-squares slope of the last hour, projected to close, damped
+  const look = Math.min(bars.length, 12);
+  let momentum = 0;
+  if (look >= 4) {
+    const ys = bars.slice(-look).map(b => b.price);
+    const n = ys.length, xm = (n - 1) / 2;
+    let num = 0, den = 0, ym = ys.reduce((a, b) => a + b, 0) / n;
+    for (let i = 0; i < n; i++) { num += (i - xm) * (ys[i] - ym); den += (i - xm) ** 2; }
+    const slopePerBar = num / den;
+    const barsLeft = fracLeft * SESSION_MIN / BAR_MIN;
+    momentum = slopePerBar * barsLeft * 0.35;
+  }
+
+  const vwapPull = (quote.vwap - spot) * 0.25 * fracLeft;
+
+  // options gravity: pull toward max pain, stronger near expiry
+  const expW = 1 / (1 + drv.dte);
+  const rawPin = (drv.maxPain - spot) * 0.35 * expW * fracLeft;
+  const sigmaFull = spot * drv.impliedDayMovePct / 100;
+  const pinCap = 0.6 * sigmaFull;
+  const optionsPull = Math.max(-pinCap, Math.min(pinCap, rawPin));
+
+  // futures: premium/discount vs fair value reads as positioning
+  const basisSignal = (drv.futLast - drv.fair) * 0.3;
+
+  const parts = [
+    { label: "Momentum", v: momentum },
+    { label: "VWAP pull", v: vwapPull },
+    { label: "Options gravity", v: optionsPull },
+    { label: "Futures signal", v: basisSignal },
+  ];
+  let expected = spot + parts.reduce((a, p) => a + p.v, 0);
+
+  const band = sigmaFull * Math.sqrt(fracLeft);
+  expected = Math.max(spot - 1.2 * band, Math.min(spot + 1.2 * band, expected));
+
+  const vsPrev = expected - quote.prevClose;
+  const vsSpot = expected - spot;
+  let stance = "flat", stanceText = "Flat close likely";
+  if (vsSpot > 0.3 * band) { stance = "up"; stanceText = "Likely to close higher from here"; }
+  else if (vsSpot < -0.3 * band) { stance = "down"; stanceText = "Likely to close lower from here"; }
+
+  return { expected, band, parts, vsPrev, vsSpot, stance, stanceText, fracLeft };
+}
+
+/* ================= data layer ================= */
+
+const state = {
+  selected: "NIFTY 50",
+  source: "demo",          // "demo" | "live" | "mixed"
+  liveTried: false,
+  liveQuotes: new Map(),   // sym -> {last, prevClose, bars, open, high, low, vwap}
+  customs: new Map(),      // searched symbols -> inst
+  sort: { key: "weight", dir: -1 },
+  filter: "",
+};
+
+function instrumentFor(sym) {
+  if (INDEXES[sym]) return INDEXES[sym];
+  const n = NIFTY50.find(s => s.sym === sym);
+  if (n) return { ...n, exch: "NSE", yahoo: n.sym.replace("&", "%26") + ".NS" };
+  return state.customs.get(sym);
+}
+
+function quoteFor(inst, sess) {
+  const live = state.liveQuotes.get(inst.sym);
+  if (live) return { ...live, source: "live" };
+  const sim = simSession(inst, sess);
+  return { ...sim, source: "sim" };
+}
+
+function yahooSymbol(inst) {
+  if (inst.yahoo) return inst.yahoo;
+  const suffix = inst.exch === "BSE" ? ".BO" : ".NS";
+  return encodeURIComponent(inst.sym) + suffix;
+}
+
+async function fetchYahoo(inst) {
+  const url = `https://query1.finance.yahoo.com/v8/finance/chart/${yahooSymbol(inst)}?interval=5m&range=1d&includePrePost=false`;
+  const attempts = [url, ...CORS_PROXIES.map(p => p(url))];
+  for (const u of attempts) {
+    try {
+      const ctl = new AbortController();
+      const t = setTimeout(() => ctl.abort(), 7000);
+      const res = await fetch(u, { signal: ctl.signal });
+      clearTimeout(t);
+      if (!res.ok) continue;
+      const j = await res.json();
+      const r = j?.chart?.result?.[0];
+      if (!r?.meta?.regularMarketPrice) continue;
+      const closes = r.indicators?.quote?.[0]?.close || [];
+      const ts = r.timestamp || [];
+      const bars = [];
+      let volSum = 0, pvSum = 0;
+      const vols = r.indicators?.quote?.[0]?.volume || [];
+      for (let i = 0; i < ts.length; i++) {
+        if (closes[i] == null) continue;
+        const d = new Date(ts[i] * 1000);
+        const istMin = minsOfDay(new Date(d.toLocaleString("en-US", { timeZone: "Asia/Kolkata" })));
+        bars.push({ min: istMin, price: closes[i] });
+        const v = vols[i] || 1;
+        volSum += v; pvSum += v * closes[i];
+      }
+      if (bars.length < 2) continue;
+      const prices = bars.map(b => b.price);
+      return {
+        last: r.meta.regularMarketPrice,
+        prevClose: r.meta.chartPreviousClose ?? r.meta.previousClose ?? prices[0],
+        bars,
+        open: prices[0],
+        high: Math.max(...prices), low: Math.min(...prices),
+        vwap: volSum ? pvSum / volSum : prices.reduce((a, b) => a + b) / prices.length,
+      };
+    } catch (_) { /* next attempt */ }
+  }
+  return null;
+}
+
+let liveLoadToken = 0;
+async function tryGoLive() {
+  const token = ++liveLoadToken;
+  state.liveTried = true;
+  setSourcePill("checking");
+  const idx = await fetchYahoo(INDEXES["NIFTY 50"]);
+  if (token !== liveLoadToken) return;
+  if (!idx) { state.source = "demo"; setSourcePill("demo"); render(); return; }
+  state.liveQuotes.set("NIFTY 50", idx);
+  state.source = "live";
+  setSourcePill("live");
+  render();
+  // lazily hydrate constituents, few at a time
+  const queue = [...NIFTY50.map(s => s.sym), "SENSEX"];
+  const workers = Array.from({ length: 3 }, async () => {
+    while (queue.length) {
+      if (token !== liveLoadToken) return;
+      const sym = queue.shift();
+      const q = await fetchYahoo(instrumentFor(sym));
+      if (token !== liveLoadToken) return;
+      if (q) { state.liveQuotes.set(sym, q); renderTable(); if (sym === state.selected) render(); }
+    }
+  });
+  await Promise.all(workers);
+}
+
+/* ================= rendering ================= */
+
+const $ = id => document.getElementById(id);
+
+function setSourcePill(mode) {
+  const pill = $("sourcePill"), txt = $("sourcePillText"), retry = $("retryLive");
+  pill.classList.remove("live", "demo");
+  if (mode === "live") { pill.classList.add("live"); txt.textContent = "Live · Yahoo Finance"; retry.hidden = true; }
+  else if (mode === "checking") { txt.textContent = "Connecting…"; retry.hidden = true; }
+  else { pill.classList.add("demo"); txt.textContent = "Demo data (simulated)"; retry.hidden = false; }
+}
+
+function renderMarketPill(sess) {
+  const pill = $("marketPill");
+  pill.classList.toggle("open", sess.live);
+  const hh = String(Math.floor(SESSION_CLOSE / 60)).padStart(2, "0");
+  $("marketPillText").textContent = sess.live
+    ? `Market open · closes 15:30 IST`
+    : `Market closed · showing last session`;
+}
+
+function fmtTimeIST(min) {
+  const h = Math.floor(min / 60), m = Math.round(min % 60);
+  return `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}`;
+}
+
+function render() {
+  const sess = sessionInfo();
+  renderMarketPill(sess);
+  $("updatedAt").textContent = "Updated " + sess.now.toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit", second: "2-digit" }) + " IST";
+
+  const inst = instrumentFor(state.selected);
+  const quote = quoteFor(inst, sess);
+  const drv = simDerivatives(inst, quote.last, quote.prevClose);
+  const pred = predictClose(inst, quote, drv, sess);
+
+  renderHero(inst, quote, pred, sess);
+  renderChart(inst, quote, pred, sess);
+  renderDeep(inst, quote, drv, pred, sess);
+  renderTable(sess);
+}
+
+function renderHero(inst, q, pred, sess) {
+  $("instName").textContent = inst.name;
+  $("instExch").textContent = `${inst.exch}${inst.isIndex ? " · INDEX" : ""}${q.source === "sim" && state.source !== "demo" ? " · SIM" : ""}`;
+  const sec = $("instSector");
+  sec.hidden = !inst.sector || inst.sector === "Index";
+  sec.textContent = inst.sector;
+
+  const chg = q.last - q.prevClose;
+  const chgPct = chg / q.prevClose * 100;
+  $("instPrice").textContent = (inst.isIndex ? "" : "₹") + inr(q.last);
+  const del = $("instDelta");
+  del.textContent = `${signed(chg)} (${pct(chgPct)}) today`;
+  del.className = "delta " + (chg >= 0 ? "up" : "down");
+
+  $("mPrev").textContent = inr(q.prevClose);
+  $("mOpen").textContent = inr(q.open);
+  $("mRange").textContent = `${inr(q.low)} – ${inr(q.high)}`;
+  $("mVwap").textContent = inr(q.vwap);
+
+  $("predictLabel").textContent = sess.live ? "Expected close today (15:30 IST)" : "Expected close · next session";
+  $("predictValue").textContent = (inst.isIndex ? "" : "₹") + inr(pred.expected);
+  $("predictRange").textContent = `± ${inr(pred.band)} likely range · ${signed(pred.vsPrev)} (${pct(pred.vsPrev / q.prevClose * 100)}) vs prev close`;
+  const chip = $("predictChip");
+  chip.className = "predict-chip " + pred.stance;
+  chip.textContent = (pred.stance === "up" ? "▲ " : pred.stance === "down" ? "▼ " : "◆ ") + pred.stanceText;
+}
+
+/* ---------- main chart (SVG) ---------- */
+
+const chartGeom = { pts: [], x: () => 0, y: () => 0, padL: 0, padR: 0, w: 0, h: 0 };
+
+function renderChart(inst, q, pred, sess) {
+  const svg = $("chart");
+  const box = $("chartBox");
+  const w = Math.max(320, box.clientWidth);
+  const h = 320;
+  const padL = 58, padR = 16, padT = 16, padB = 30;
+  svg.setAttribute("viewBox", `0 0 ${w} ${h}`);
+  svg.setAttribute("height", h);
+
+  const closeX = SESSION_CLOSE;
+  const lastBar = q.bars[q.bars.length - 1];
+  const yVals = [...q.bars.map(b => b.price), q.prevClose, pred.expected + pred.band, pred.expected - pred.band];
+  let yMin = Math.min(...yVals), yMax = Math.max(...yVals);
+  const padY = (yMax - yMin) * 0.12 || yMax * 0.002;
+  yMin -= padY; yMax += padY;
+
+  const x = min => padL + (min - SESSION_OPEN) / (closeX - SESSION_OPEN) * (w - padL - padR);
+  const y = p => padT + (yMax - p) / (yMax - yMin) * (h - padT - padB);
+
+  Object.assign(chartGeom, { pts: q.bars, x, y, padL, padR, w, h, inst, q });
+
+  const yTicks = niceTicks(yMin, yMax, 5);
+  const xTickMins = [SESSION_OPEN, 10*60, 11*60, 12*60, 13*60, 14*60, 15*60, SESSION_CLOSE];
+
+  let s = "";
+  // grid + axes (hairline, solid, recessive)
+  for (const t of yTicks) {
+    s += `<line x1="${padL}" y1="${y(t)}" x2="${w - padR}" y2="${y(t)}" stroke="var(--grid)" stroke-width="1"/>`;
+    s += `<text x="${padL - 8}" y="${y(t) + 4}" text-anchor="end" font-size="11" fill="var(--muted)" style="font-variant-numeric:tabular-nums">${fmtIN0.format(t)}</text>`;
+  }
+  for (const m of xTickMins) {
+    s += `<text x="${x(m)}" y="${h - 10}" text-anchor="middle" font-size="11" fill="var(--muted)">${fmtTimeIST(m)}</text>`;
+  }
+  s += `<line x1="${padL}" y1="${h - padB}" x2="${w - padR}" y2="${h - padB}" stroke="var(--axis)" stroke-width="1"/>`;
+
+  // prev close reference
+  const yPrev = y(q.prevClose);
+  s += `<line x1="${padL}" y1="${yPrev}" x2="${w - padR}" y2="${yPrev}" stroke="var(--axis)" stroke-width="1"/>`;
+  s += `<text x="${padL + 4}" y="${yPrev - 5}" font-size="10.5" fill="var(--muted)">Prev close ${inr(q.prevClose)}</text>`;
+
+  // price area wash + line
+  const linePts = q.bars.map(b => `${x(b.min).toFixed(1)},${y(b.price).toFixed(1)}`).join(" ");
+  s += `<polygon points="${x(q.bars[0].min).toFixed(1)},${h - padB} ${linePts} ${x(lastBar.min).toFixed(1)},${h - padB}" fill="var(--s1)" opacity="0.10"/>`;
+  s += `<polyline points="${linePts}" fill="none" stroke="var(--s1)" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>`;
+
+  // projection: band wedge + dashed path + expected marker
+  if (sess.live) {
+    const x0 = x(lastBar.min), y0 = y(lastBar.price);
+    const x1 = x(closeX);
+    s += `<polygon points="${x0},${y0} ${x1},${y(pred.expected + pred.band)} ${x1},${y(pred.expected - pred.band)}" fill="var(--s2)" opacity="0.10"/>`;
+    s += `<line x1="${x0}" y1="${y0}" x2="${x1}" y2="${y(pred.expected)}" stroke="var(--s2)" stroke-width="2" stroke-dasharray="5 4" stroke-linecap="round"/>`;
+    s += `<circle cx="${x1}" cy="${y(pred.expected)}" r="5" fill="var(--s2)" stroke="var(--surface-1)" stroke-width="2"/>`;
+    s += `<text x="${x1 - 8}" y="${y(pred.expected) - 9}" text-anchor="end" font-size="11.5" font-weight="600" fill="var(--ink-2)">Expected ${fmtIN0.format(pred.expected)}</text>`;
+  } else {
+    const x1 = x(closeX);
+    s += `<circle cx="${x1}" cy="${y(pred.expected)}" r="5" fill="var(--s2)" stroke="var(--surface-1)" stroke-width="2"/>`;
+    s += `<text x="${x1 - 8}" y="${y(pred.expected) - 9}" text-anchor="end" font-size="11.5" font-weight="600" fill="var(--ink-2)">Next close est. ${fmtIN0.format(pred.expected)}</text>`;
+  }
+
+  // current price marker
+  s += `<circle cx="${x(lastBar.min)}" cy="${y(lastBar.price)}" r="4.5" fill="var(--s1)" stroke="var(--surface-1)" stroke-width="2"/>`;
+
+  // hover layer targets
+  s += `<line id="xhair" x1="0" y1="${padT}" x2="0" y2="${h - padB}" stroke="var(--axis)" stroke-width="1" visibility="hidden"/>`;
+  s += `<circle id="xdot" r="4.5" fill="var(--s1)" stroke="var(--surface-1)" stroke-width="2" visibility="hidden"/>`;
+
+  svg.innerHTML = s;
+}
+
+function niceTicks(lo, hi, n) {
+  const span = hi - lo;
+  const step0 = span / n;
+  const mag = Math.pow(10, Math.floor(Math.log10(step0)));
+  const step = [1, 2, 2.5, 5, 10].map(m => m * mag).find(sv => span / sv <= n + 1) || mag * 10;
+  const ticks = [];
+  for (let t = Math.ceil(lo / step) * step; t <= hi; t += step) ticks.push(t);
+  return ticks;
+}
+
+function bindChartHover() {
+  const svg = $("chart"), tip = $("chartTip"), box = $("chartBox");
+  function onMove(ev) {
+    const g = chartGeom;
+    if (!g.pts.length) return;
+    const rect = svg.getBoundingClientRect();
+    const px = (ev.clientX - rect.left) * (g.w / rect.width);
+    let best = null, bestD = Infinity;
+    for (const b of g.pts) {
+      const d = Math.abs(g.x(b.min) - px);
+      if (d < bestD) { bestD = d; best = b; }
+    }
+    if (!best || bestD > 40) { onLeave(); return; }
+    const bx = g.x(best.min), by = g.y(best.price);
+    const xh = svg.querySelector("#xhair"), xd = svg.querySelector("#xdot");
+    xh.setAttribute("x1", bx); xh.setAttribute("x2", bx); xh.setAttribute("visibility", "visible");
+    xd.setAttribute("cx", bx); xd.setAttribute("cy", by); xd.setAttribute("visibility", "visible");
+    const chg = best.price - g.q.prevClose;
+    tip.innerHTML = `<div class="t">${fmtTimeIST(best.min)} IST</div>` +
+      `<div class="v">${g.inst.isIndex ? "" : "₹"}${inr(best.price)}</div>` +
+      `<div class="d ${chg >= 0 ? "up" : "down"}" style="color:var(--${chg >= 0 ? "up" : "down"})">${signed(chg)} (${pct(chg / g.q.prevClose * 100)})</div>`;
+    tip.style.display = "block";
+    const bxCss = bx * (rect.width / g.w);
+    const flip = bxCss > rect.width - 150;
+    tip.style.left = flip ? (bxCss - tip.offsetWidth - 12) + "px" : (bxCss + 12) + "px";
+    tip.style.top = Math.max(0, by * (rect.height / g.h) - 30) + "px";
+  }
+  function onLeave() {
+    tip.style.display = "none";
+    const xh = svg.querySelector("#xhair"), xd = svg.querySelector("#xdot");
+    if (xh) xh.setAttribute("visibility", "hidden");
+    if (xd) xd.setAttribute("visibility", "hidden");
+  }
+  box.addEventListener("mousemove", onMove);
+  box.addEventListener("mouseleave", onLeave);
+}
+
+/* ---------- deep dive ---------- */
+
+function renderDeep(inst, q, drv, pred, sess) {
+  const srcTag = state.source === "live" && q.source === "live"
+    ? `<span class="tag">modeled from live prices</span>` : `<span class="tag">simulated</span>`;
+  const expStr = drv.expiry.toLocaleDateString("en-IN", { day: "numeric", month: "short" });
+  const basisWord = drv.basisPts >= 0 ? "premium" : "discount";
+  const pcrRead = drv.pcr > 1.15 ? "put-heavy — traders hedged or bullish-supported"
+               : drv.pcr < 0.85 ? "call-heavy — optimism priced in, upside may be capped"
+               : "balanced";
+
+  $("deepTiles").innerHTML = `
+    <div class="tile">
+      <h4>Futures ${srcTag}</h4>
+      <div class="kv"><label>Near contract (${expStr})</label><b>${inr(drv.futLast)}</b></div>
+      <div class="kv"><label>Fair value (cost of carry)</label><b>${inr(drv.fair)}</b></div>
+      <div class="kv"><label>Basis vs spot</label><b>${signed(drv.basisPts / 100)}% ${basisWord}</b></div>
+    </div>
+    <div class="tile">
+      <h4>Options ${srcTag}</h4>
+      <div class="kv"><label>Max pain strike</label><b>${fmtIN0.format(drv.maxPain)}</b></div>
+      <div class="kv"><label>Put/Call ratio (OI)</label><b>${drv.pcr.toFixed(2)}</b></div>
+      <div class="kv"><label>ATM implied volatility</label><b>${drv.iv.toFixed(1)}%</b></div>
+      <div class="kv"><label>Straddle-implied move (to ${expStr})</label><b>± ${inr(drv.straddle / 2)}</b></div>
+    </div>
+    <div class="tile">
+      <h4>Technicals</h4>
+      <div class="kv"><label>VWAP</label><b>${inr(q.vwap)}</b></div>
+      <div class="kv"><label>Price vs VWAP</label><b>${signed((q.last - q.vwap) / q.vwap * 100)}%</b></div>
+      <div class="kv"><label>Day range used</label><b>${((q.high - q.low) / q.prevClose * 100).toFixed(2)}%</b></div>
+      <div class="kv"><label>Session complete</label><b>${Math.round(sess.live ? sess.fracDone * 100 : 100)}%</b></div>
+    </div>
+    <div class="tile">
+      <h4>Reading it</h4>
+      <div class="kv"><label>Positioning</label><b style="max-width:170px;white-space:normal">${pcrRead}</b></div>
+      <div class="kv"><label>Options magnet</label><b>${fmtIN0.format(drv.maxPain)} (${signed((drv.maxPain - q.last) / q.last * 100)}% away)</b></div>
+      <div class="kv"><label>Futures mood</label><b>${drv.basisPts >= 3 ? "leaning long" : drv.basisPts <= -3 ? "leaning short" : "neutral"}</b></div>
+    </div>`;
+
+  const maxAbs = Math.max(...pred.parts.map(p => Math.abs(p.v)), 1e-9);
+  $("contrib").innerHTML = `<h4>What moves the expected close (${inst.isIndex ? "points" : "₹"})</h4>` +
+    pred.parts.map(p => {
+      const wPct = Math.min(50, Math.abs(p.v) / maxAbs * 50);
+      const side = p.v >= 0
+        ? `<span class="bar pos" style="left:50%;width:${wPct}%"></span>`
+        : `<span class="bar neg" style="left:${50 - wPct}%;width:${wPct}%"></span>`;
+      return `<div class="contrib-row"><label>${p.label}</label>
+        <span class="contrib-track"><span class="zero"></span>${side}</span>
+        <span class="val" style="color:var(--${p.v >= 0 ? "up" : "down"})">${signed(p.v)}</span></div>`;
+    }).join("");
+
+  $("method").innerHTML =
+    `<b>How the expected close is built.</b> We start from the current price and add four measured pulls:
+     <b>momentum</b> (the last hour's trend, damped and projected to the close), <b>VWAP pull</b> (prices tend
+     to drift back toward the volume-weighted average), <b>options gravity</b> (option writers profit when the
+     market settles near the max-pain strike, so heavy open interest acts like a magnet — strongest close to
+     expiry), and the <b>futures signal</b> (a futures price above its cost-of-carry fair value means traders
+     are paying up to be long). The ± range is the move implied by ATM option prices, shrunk by how much of
+     the session is left. ${state.source === "live" ? "Prices are live; derivatives figures are modeled from them because exchanges do not provide a free browser-accessible F&O feed." : "In demo mode everything, including derivatives, is simulated — the mechanics are identical with live data."}`;
+}
+
+/* ---------- constituents table ---------- */
+
+function sparkline(bars, isUp) {
+  const pts = [];
+  const step = Math.max(1, Math.floor(bars.length / 12));
+  for (let i = 0; i < bars.length; i += step) pts.push(bars[i].price);
+  pts.push(bars[bars.length - 1].price);
+  const w = 84, h = 26;
+  let lo = Math.min(...pts), hi = Math.max(...pts);
+  if (hi - lo < 1e-9) hi = lo + 1;
+  const xy = pts.map((p, i) => `${(i / (pts.length - 1) * (w - 8) + 2).toFixed(1)},${(3 + (hi - p) / (hi - lo) * (h - 8)).toFixed(1)}`);
+  const endX = (w - 6), endY = 3 + (hi - pts[pts.length - 1]) / (hi - lo) * (h - 8);
+  return `<svg width="${w}" height="${h}" aria-hidden="true">
+    <polyline points="${xy.join(" ")}" fill="none" stroke="var(--s1-soft)" stroke-width="1.5" stroke-linejoin="round"/>
+    <circle cx="${xy[xy.length - 1].split(",")[0]}" cy="${endY.toFixed(1)}" r="2.6" fill="var(--s1)" stroke="var(--surface-1)" stroke-width="1.5"/>
+  </svg>`;
+}
+
+let tableCache = [];
+function renderTable(sessArg) {
+  const sess = sessArg || sessionInfo();
+  const rows = [];
+  const universe = [...NIFTY50.map(s => s.sym), ...state.customs.keys()];
+  for (const sym of universe) {
+    const inst = instrumentFor(sym);
+    const q = quoteFor(inst, sess);
+    const drv = simDerivatives(inst, q.last, q.prevClose);
+    const pred = predictClose(inst, q, drv, sess);
+    rows.push({ sym, inst, q, pred,
+      price: q.last, chg: (q.last - q.prevClose) / q.prevClose * 100,
+      exp: pred.expected, expd: pred.vsSpot / q.last * 100, weight: inst.weight || 0 });
+  }
+  const f = state.filter.trim().toUpperCase();
+  let view = f ? rows.filter(r => r.sym.includes(f) || r.inst.name.toUpperCase().includes(f)) : rows;
+  const { key, dir } = state.sort;
+  view = view.slice().sort((a, b) => (a[key] - b[key]) * dir);
+  tableCache = view;
+
+  $("tblBody").innerHTML = view.map(r => {
+    const up = r.chg >= 0, expUp = r.expd >= 0;
+    const simFlag = state.source === "live" && r.q.source === "sim" ? `<span class="srcflag">sim</span>` : "";
+    return `<tr data-sym="${r.sym}" class="${r.sym === state.selected ? "sel" : ""}" tabindex="0">
+      <td><span class="sym">${r.sym}</span>${simFlag}<span class="nm">${r.inst.name} · ${r.inst.sector || r.inst.exch}</span></td>
+      <td>${inr(r.price)}</td>
+      <td class="${up ? "up" : "down"}">${pct(r.chg)}</td>
+      <td>${sparkline(r.q.bars, up)}</td>
+      <td>${inr(r.exp)}</td>
+      <td class="${expUp ? "up" : "down"}">${pct(r.expd)}</td>
+    </tr>`;
+  }).join("") || `<tr><td colspan="6" style="text-align:center;color:var(--muted);padding:24px">No match in the list — press Enter to look it up on ${$("exchSel").value}.</td></tr>`;
+}
+
+/* ================= interactions ================= */
+
+function selectSymbol(sym) {
+  state.selected = sym;
+  render();
+  window.scrollTo({ top: 0, behavior: "smooth" });
+}
+
+function addCustomSymbol(raw) {
+  const sym = raw.trim().toUpperCase().replace(/\.(NS|BO)$/, "");
+  if (!sym) return;
+  if (INDEXES[sym]) { selectSymbol(sym); return; }
+  if (NIFTY50.some(s => s.sym === sym)) { selectSymbol(sym); return; }
+  const exch = $("exchSel").value;
+  if (!state.customs.has(sym)) {
+    const rng = mulberry32(hashCode("custom:" + sym));
+    state.customs.set(sym, {
+      sym, name: sym, sector: exch, exch,
+      base: 80 + rng() * 4200, vol: 1.2 + rng() * 1.4, weight: 0,
+    });
+  }
+  selectSymbol(sym);
+  if (state.source === "live") {
+    fetchYahoo(instrumentFor(sym)).then(q => {
+      if (q) { state.liveQuotes.set(sym, q); if (state.selected === sym) render(); else renderTable(); }
+    });
+  }
+}
+
+function bindUI() {
+  $("tblBody").addEventListener("click", e => {
+    const tr = e.target.closest("tr[data-sym]");
+    if (tr) selectSymbol(tr.dataset.sym);
+  });
+  $("tblBody").addEventListener("keydown", e => {
+    if (e.key === "Enter") {
+      const tr = e.target.closest("tr[data-sym]");
+      if (tr) selectSymbol(tr.dataset.sym);
+    }
+  });
+  $("search").addEventListener("input", e => { state.filter = e.target.value; renderTable(); });
+  $("search").addEventListener("keydown", e => {
+    if (e.key === "Enter") {
+      const f = state.filter.trim().toUpperCase();
+      const hit = tableCache[0];
+      if (hit && f && (hit.sym.includes(f) || hit.inst.name.toUpperCase().includes(f))) selectSymbol(hit.sym);
+      else addCustomSymbol(state.filter);
+    }
+  });
+  document.querySelectorAll("th.sortable").forEach(th => {
+    th.addEventListener("click", () => {
+      const k = th.dataset.sort;
+      if (state.sort.key === k) state.sort.dir *= -1;
+      else state.sort = { key: k, dir: -1 };
+      renderTable();
+    });
+  });
+  $("openDeep").addEventListener("click", () => {
+    const d = $("deepDive");
+    d.open = true;
+    d.scrollIntoView({ behavior: "smooth", block: "start" });
+  });
+  $("retryLive").addEventListener("click", () => tryGoLive());
+
+  const themes = ["auto", "light", "dark"];
+  let ti = 0;
+  const saved = localStorage.getItem("nl-theme");
+  if (saved && themes.includes(saved)) { ti = themes.indexOf(saved); applyTheme(saved); }
+  $("themeBtn").addEventListener("click", () => {
+    ti = (ti + 1) % themes.length;
+    applyTheme(themes[ti]);
+    localStorage.setItem("nl-theme", themes[ti]);
+  });
+  function applyTheme(t) {
+    if (t === "auto") document.documentElement.removeAttribute("data-theme");
+    else document.documentElement.setAttribute("data-theme", t);
+    $("themeBtn").textContent = "Theme: " + t;
+    render();
+  }
+
+  window.addEventListener("resize", () => render());
+  document.addEventListener("visibilitychange", () => { if (!document.hidden) render(); });
+}
+
+/* ================= boot ================= */
+
+bindUI();
+bindChartHover();
+render();
+tryGoLive();
+setInterval(render, 30000);
+setInterval(() => { if (state.source === "live" && !document.hidden) tryGoLive(); }, 5 * 60 * 1000);
+</script>
+</body>
+</html>
