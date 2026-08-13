@@ -4,7 +4,22 @@ A single-page application for tracking the **NIFTY 50 index, its 50 constituents
 NSE/BSE stock** — spot price plus a futures/options view — without making you read an
 option chain.
 
-Open `index.html` in any modern browser. No build step, no dependencies, one file.
+## Run it
+
+**Recommended — official NSE data** (Node 18+, zero dependencies):
+
+```bash
+node server.js        # open http://localhost:8080
+```
+
+`server.js` serves the app and proxies NSE's official API (`nseindia.com`), handling
+the cookie handshake and headers that block direct browser calls. You get the real
+index/constituent quotes, real intraday charts, and the **actual option chain** —
+real max pain, put/call ratio, implied volatility, ATM straddle and futures basis.
+
+**Or just open `index.html`** in any browser — no server at all. The app then uses
+Yahoo Finance for live prices (derivatives modeled), or a clearly-badged simulation
+if nothing is reachable.
 
 ## The idea
 
@@ -50,15 +65,18 @@ hours, the prediction rolls to the next session.
 
 ## Data sources — honest labeling
 
-- **Live mode**: spot prices come from Yahoo Finance (`^NSEI`, `SYMBOL.NS` / `SYMBOL.BO`),
-  fetched directly or through public CORS proxies. The index loads first; constituents
-  hydrate in the background.
-- **Demo mode**: if no live source is reachable, the app falls back to a deterministic,
-  seeded intraday simulation — clearly badged **"Demo data (simulated)"** with a
-  one-click retry.
-- **Derivatives are always modeled** (from live prices when available): exchanges do not
-  provide a free browser-accessible F&O feed. The deep-dive tiles are tagged
-  `modeled` / `simulated` accordingly.
+The app tries sources in order and badges whichever it is using:
+
+1. **Live · NSE official** — when served through `server.js`: one snapshot call gets
+   the index plus all 50 constituent quotes; intraday charts, the real option chain
+   (`option-chain-indices` / `option-chain-equities`) and the near futures contract
+   come from the same official API. Deep-dive tiles are tagged `live · NSE`.
+   BSE symbols (e.g. SENSEX) fall back to Yahoo per instrument.
+2. **Live · Yahoo Finance** — when opened as a plain file: spot prices via
+   `^NSEI`, `SYMBOL.NS` / `SYMBOL.BO`, fetched through public CORS proxies.
+   Derivatives are modeled from live prices and tagged accordingly.
+3. **Demo data (simulated)** — if nothing is reachable: a deterministic, seeded
+   intraday simulation, clearly badged with a one-click retry.
 
 ## Disclaimer
 

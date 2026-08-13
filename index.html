@@ -632,7 +632,7 @@ function predictClose(inst, quote, drv, sess) {
 
 const state = {
   selected: "NIFTY 50",
-  source: "demo",          // "demo" | "live" | "mixed"
+  source: "demo",          // "demo" | "yahoo" | "nse"
   liveTried: false,
   liveQuotes: new Map(),   // sym -> {last, prevClose, bars, open, high, low, vwap}
   customs: new Map(),      // searched symbols -> inst
@@ -649,7 +649,22 @@ function instrumentFor(sym) {
 
 function quoteFor(inst, sess) {
   const live = state.liveQuotes.get(inst.sym);
-  if (live) return { ...live, source: "live" };
+  if (live) {
+    let { bars, vwap } = live;
+    if (!bars) {
+      // real OHLC snapshot but no intraday series yet: show a placeholder path
+      // pinned to the real low/high/last until the chart hydrates
+      const sim = simSession(inst, sess);
+      const lo = Math.min(...sim.bars.map(b => b.price));
+      const hi = Math.max(...sim.bars.map(b => b.price));
+      const span = hi - lo || 1;
+      bars = sim.bars.map(b => ({ min: b.min, price: live.low + (b.price - lo) / span * (live.high - live.low) }));
+      bars[bars.length - 1] = { min: bars[bars.length - 1].min, price: live.last };
+      return { ...live, bars, vwap: vwap || (live.high + live.low + live.last) / 3, source: "live", barsApprox: true };
+    }
+    if (!vwap) vwap = bars.reduce((a, b) => a + b.price, 0) / bars.length;
+    return { ...live, bars, vwap, source: "live" };
+  }
   const sim = simSession(inst, sess);
   return { ...sim, source: "sim" };
 }
@@ -701,19 +716,242 @@ async function fetchYahoo(inst) {
   return null;
 }
 
+/* ---------- official NSE source (via the cookie-handling proxy in server.js) ----------
+   NSE's API blocks cross-origin browser calls, so these endpoints only work when
+   the app is served by server.js (or any host exposing /api/nse/*). */
+
+let nseOK = null;
+async function nseHealth() {
+  if (location.protocol !== "http:" && location.protocol !== "https:") return false;
+  if (nseOK !== null) return nseOK;
+  try {
+    const r = await fetch("/api/health", { signal: AbortSignal.timeout(3000) });
+    nseOK = r.ok;
+  } catch (_) { nseOK = false; }
+  return nseOK;
+}
+
+async function nseJson(apiPath, timeout = 12000) {
+  const r = await fetch("/api/nse/" + apiPath, { signal: AbortSignal.timeout(timeout) });
+  if (!r.ok) throw new Error("proxy " + r.status);
+  const j = await r.json();
+  if (j && j.error) throw new Error(j.error);
+  return j;
+}
+
+/* NSE chart timestamps are ambiguous across deployments; bucket both readings
+   into 5-min session bars and keep whichever lands inside market hours. */
+function nseBarsFrom(graph) {
+  const mk = shifted => {
+    const out = [];
+    let lastMin = -1;
+    for (const pt of graph) {
+      const ts = pt[0], price = pt[1];
+      if (price == null) continue;
+      const d = new Date(ts);
+      const min = shifted
+        ? minsOfDay(new Date(d.toLocaleString("en-US", { timeZone: "Asia/Kolkata" })))
+        : d.getUTCHours() * 60 + d.getUTCMinutes();
+      if (min < SESSION_OPEN - 1 || min > SESSION_CLOSE + 1) continue;
+      const bucket = SESSION_OPEN + Math.floor((min - SESSION_OPEN) / BAR_MIN) * BAR_MIN;
+      if (bucket === lastMin) out[out.length - 1].price = price;
+      else { out.push({ min: bucket, price }); lastMin = bucket; }
+    }
+    return out;
+  };
+  const a = mk(true), b = mk(false);
+  return b.length > a.length ? b : a;
+}
+
+async function nseChart(inst) {
+  const p = inst.isIndex
+    ? `chart-databyindex?index=${encodeURIComponent(inst.sym)}&indices=true`
+    : `chart-databyindex?index=${encodeURIComponent(inst.sym)}EQN`;
+  const j = await nseJson(p);
+  const bars = nseBarsFrom(j.grapthData || j.graphData || []);
+  return bars.length >= 2 ? bars : null;
+}
+
+async function loadNSESnapshot() {
+  const j = await nseJson("equity-stockIndices?index=NIFTY%2050");
+  const rows = j?.data || [];
+  let got = 0;
+  for (const r of rows) {
+    if (!r.symbol || r.lastPrice == null || !r.previousClose) continue;
+    if (r.symbol !== "NIFTY 50" && !NIFTY50.some(s => s.sym === r.symbol)) continue;
+    const prev = state.liveQuotes.get(r.symbol);
+    state.liveQuotes.set(r.symbol, {
+      last: r.lastPrice, prevClose: r.previousClose, open: r.open,
+      high: r.dayHigh, low: r.dayLow,
+      vwap: prev?.vwap || null, bars: prev?.bars || null,
+    });
+    got++;
+  }
+  return got > 5;
+}
+
+const MONTHS = { Jan:0, Feb:1, Mar:2, Apr:3, May:4, Jun:5, Jul:6, Aug:7, Sep:8, Oct:9, Nov:10, Dec:11 };
+function parseNSEDate(s) {
+  const [d, m, y] = String(s).split("-");
+  return new Date(+y, MONTHS[m] ?? 0, +d, 15, 30);
+}
+
+async function fetchNSEDerivatives(inst, spot) {
+  const optSym = inst.isIndex ? (inst.sym === "NIFTY 50" ? "NIFTY" : null) : inst.sym;
+  if (!optSym || inst.exch === "BSE") return null;
+  const ep = inst.isIndex ? "option-chain-indices" : "option-chain-equities";
+  const j = await nseJson(`${ep}?symbol=${encodeURIComponent(optSym)}`);
+  const expiries = j?.records?.expiryDates || [];
+  const all = j?.records?.data || [];
+  if (!expiries.length || !all.length) return null;
+  const expStr = expiries[0];
+  const expiry = parseNSEDate(expStr);
+  const dte = daysTo(expiry);
+  const under = j.records.underlyingValue || spot;
+  const chain = all.filter(r => r.expiryDate === expStr).map(r => ({
+    K: r.strikePrice,
+    c: r.CE?.openInterest || 0, p: r.PE?.openInterest || 0,
+    civ: r.CE?.impliedVolatility || 0, piv: r.PE?.impliedVolatility || 0,
+    cltp: r.CE?.lastPrice || 0, pltp: r.PE?.lastPrice || 0,
+  }));
+  let callOI = 0, putOI = 0;
+  for (const r of chain) { callOI += r.c; putOI += r.p; }
+  if (!callOI || !putOI) return null;
+
+  let maxPain = chain[0].K, minPain = Infinity;
+  for (const s of chain) {
+    let pain = 0;
+    for (const r of chain) pain += r.c * Math.max(0, s.K - r.K) + r.p * Math.max(0, r.K - s.K);
+    if (pain < minPain) { minPain = pain; maxPain = s.K; }
+  }
+  let atmRow = chain[0];
+  for (const r of chain) if (Math.abs(r.K - under) < Math.abs(atmRow.K - under)) atmRow = r;
+  const ivs = [atmRow.civ, atmRow.piv].filter(v => v > 1);
+  const iv = ivs.length ? ivs.reduce((a, b) => a + b, 0) / ivs.length : 15;
+  const straddle = (atmRow.cltp + atmRow.pltp) || 0.8 * under * (iv / 100) * Math.sqrt(dte / 365) * 2;
+  const ks = chain.map(r => r.K).sort((a, b) => a - b);
+  let step = Infinity;
+  for (let i = 1; i < ks.length; i++) if (ks[i] - ks[i - 1] > 0) step = Math.min(step, ks[i] - ks[i - 1]);
+  if (!isFinite(step)) step = niceStrikeStep(under);
+
+  let futLast = null;
+  try {
+    const fq = await nseJson(`quote-derivative?symbol=${encodeURIComponent(optSym)}`);
+    const futs = (fq?.stocks || []).filter(s => /Futures/i.test(s?.metadata?.instrumentType || ""));
+    futs.sort((a, b) => parseNSEDate(a.metadata.expiryDate) - parseNSEDate(b.metadata.expiryDate));
+    futLast = futs[0]?.metadata?.lastPrice ?? null;
+  } catch (_) { /* futures quote is optional */ }
+  const fair = under * (1 + RISK_FREE * dte / 365);
+  const hasFut = futLast != null && futLast > 0;
+  if (!hasFut) futLast = fair;
+
+  return {
+    expiry, dte, atm: atmRow.K, step, iv, pcr: putOI / callOI, maxPain,
+    futLast, fair, basisPts: (futLast - under) / under * 10000,
+    straddle,
+    impliedDayMovePct: (iv / 100) / Math.sqrt(252) * 100,
+    modeled: false, futModeled: !hasFut, source: "nse",
+  };
+}
+
+/* Live-derivatives cache: only the selected instrument triggers a fetch. */
+const drvLive = new Map();       // sym -> { t, drv|null }
+const drvInFlight = new Set();
+const DRV_TTL = 90000;
+
+function getDerivatives(inst, spot, prevClose, allowFetch) {
+  const hit = drvLive.get(inst.sym);
+  if (hit && Date.now() - hit.t < DRV_TTL && hit.drv) return hit.drv;
+  if (allowFetch && state.source === "nse" && !drvInFlight.has(inst.sym)
+      && (!hit || Date.now() - hit.t >= DRV_TTL)) {
+    drvInFlight.add(inst.sym);
+    fetchNSEDerivatives(inst, spot)
+      .then(d => drvLive.set(inst.sym, { t: Date.now(), drv: d }))
+      .catch(() => drvLive.set(inst.sym, { t: Date.now(), drv: null }))
+      .finally(() => {
+        drvInFlight.delete(inst.sym);
+        if (state.selected === inst.sym) render();
+      });
+  }
+  return simDerivatives(inst, spot, prevClose);
+}
+
+async function hydrateSelected() {
+  const inst = instrumentFor(state.selected);
+  if (!inst || state.source !== "nse") return;
+  // BSE symbols and non-NSE indices fall back to Yahoo per instrument
+  if (inst.exch === "BSE" || (inst.isIndex && inst.sym !== "NIFTY 50")) {
+    if (!state.liveQuotes.get(inst.sym)?.bars) {
+      const q = await fetchYahoo(inst);
+      if (q) { state.liveQuotes.set(inst.sym, q); if (state.selected === inst.sym) render(); }
+    }
+    return;
+  }
+  if (!state.liveQuotes.get(inst.sym)) {
+    try {
+      const pi = (await nseJson(`quote-equity?symbol=${encodeURIComponent(inst.sym)}`))?.priceInfo;
+      if (pi?.lastPrice) {
+        state.liveQuotes.set(inst.sym, {
+          last: pi.lastPrice, prevClose: pi.previousClose, open: pi.open,
+          high: pi.intraDayHighLow?.max ?? pi.lastPrice,
+          low: pi.intraDayHighLow?.min ?? pi.lastPrice,
+          vwap: pi.vwap || null, bars: null,
+        });
+      }
+    } catch (_) { /* not an NSE symbol; stays simulated */ }
+  }
+  const live = state.liveQuotes.get(inst.sym);
+  if (live && !live.bars) {
+    try { live.bars = await nseChart(inst); } catch (_) {}
+  }
+  if (state.selected === inst.sym) render();
+}
+
+async function hydrateBarsLazily(token) {
+  const queue = NIFTY50.map(s => s.sym).filter(s => s !== state.selected);
+  const workers = Array.from({ length: 3 }, async () => {
+    while (queue.length) {
+      if (token !== liveLoadToken) return;
+      const sym = queue.shift();
+      const live = state.liveQuotes.get(sym);
+      if (!live || live.bars) continue;
+      try { live.bars = await nseChart(instrumentFor(sym)); } catch (_) {}
+      renderTable();
+    }
+  });
+  await Promise.all(workers);
+}
+
 let liveLoadToken = 0;
 async function tryGoLive() {
   const token = ++liveLoadToken;
   state.liveTried = true;
   setSourcePill("checking");
+
+  // 1. Official NSE data, when served through server.js
+  if (await nseHealth()) {
+    try {
+      if (await loadNSESnapshot()) {
+        if (token !== liveLoadToken) return;
+        state.source = "nse";
+        setSourcePill("nse");
+        render();
+        hydrateSelected();
+        hydrateBarsLazily(token);
+        return;
+      }
+    } catch (_) { /* NSE upstream down — fall through to Yahoo */ }
+  }
+  if (token !== liveLoadToken) return;
+
+  // 2. Yahoo Finance (works from a static page via CORS proxies)
   const idx = await fetchYahoo(INDEXES["NIFTY 50"]);
   if (token !== liveLoadToken) return;
   if (!idx) { state.source = "demo"; setSourcePill("demo"); render(); return; }
   state.liveQuotes.set("NIFTY 50", idx);
-  state.source = "live";
-  setSourcePill("live");
+  state.source = "yahoo";
+  setSourcePill("yahoo");
   render();
-  // lazily hydrate constituents, few at a time
   const queue = [...NIFTY50.map(s => s.sym), "SENSEX"];
   const workers = Array.from({ length: 3 }, async () => {
     while (queue.length) {
@@ -727,6 +965,26 @@ async function tryGoLive() {
   await Promise.all(workers);
 }
 
+async function refreshLive() {
+  if (document.hidden) return;
+  if (state.source === "nse") {
+    try {
+      await loadNSESnapshot();
+      const inst = instrumentFor(state.selected);
+      if (inst && inst.exch !== "BSE") {
+        const live = state.liveQuotes.get(inst.sym);
+        if (live) {
+          const bars = await nseChart(inst).catch(() => null);
+          if (bars) live.bars = bars;
+        }
+      }
+    } catch (_) { /* keep last good data */ }
+    render();
+  } else if (state.source === "yahoo") {
+    tryGoLive();
+  }
+}
+
 /* ================= rendering ================= */
 
 const $ = id => document.getElementById(id);
@@ -734,7 +992,8 @@ const $ = id => document.getElementById(id);
 function setSourcePill(mode) {
   const pill = $("sourcePill"), txt = $("sourcePillText"), retry = $("retryLive");
   pill.classList.remove("live", "demo");
-  if (mode === "live") { pill.classList.add("live"); txt.textContent = "Live · Yahoo Finance"; retry.hidden = true; }
+  if (mode === "nse") { pill.classList.add("live"); txt.textContent = "Live · NSE official"; retry.hidden = true; }
+  else if (mode === "yahoo") { pill.classList.add("live"); txt.textContent = "Live · Yahoo Finance"; retry.hidden = true; }
   else if (mode === "checking") { txt.textContent = "Connecting…"; retry.hidden = true; }
   else { pill.classList.add("demo"); txt.textContent = "Demo data (simulated)"; retry.hidden = false; }
 }
@@ -760,7 +1019,7 @@ function render() {
 
   const inst = instrumentFor(state.selected);
   const quote = quoteFor(inst, sess);
-  const drv = simDerivatives(inst, quote.last, quote.prevClose);
+  const drv = getDerivatives(inst, quote.last, quote.prevClose, true);
   const pred = predictClose(inst, quote, drv, sess);
 
   renderHero(inst, quote, pred, sess);
@@ -919,8 +1178,10 @@ function bindChartHover() {
 /* ---------- deep dive ---------- */
 
 function renderDeep(inst, q, drv, pred, sess) {
-  const srcTag = state.source === "live" && q.source === "live"
+  const modeledTag = state.source !== "demo" && q.source === "live"
     ? `<span class="tag">modeled from live prices</span>` : `<span class="tag">simulated</span>`;
+  const optTag = drv.modeled ? modeledTag : `<span class="tag">live · NSE option chain</span>`;
+  const futTag = drv.modeled || drv.futModeled ? modeledTag : `<span class="tag">live · NSE</span>`;
   const expStr = drv.expiry.toLocaleDateString("en-IN", { day: "numeric", month: "short" });
   const basisWord = drv.basisPts >= 0 ? "premium" : "discount";
   const pcrRead = drv.pcr > 1.15 ? "put-heavy — traders hedged or bullish-supported"
@@ -929,13 +1190,13 @@ function renderDeep(inst, q, drv, pred, sess) {
 
   $("deepTiles").innerHTML = `
     <div class="tile">
-      <h4>Futures ${srcTag}</h4>
+      <h4>Futures ${futTag}</h4>
       <div class="kv"><label>Near contract (${expStr})</label><b>${inr(drv.futLast)}</b></div>
       <div class="kv"><label>Fair value (cost of carry)</label><b>${inr(drv.fair)}</b></div>
       <div class="kv"><label>Basis vs spot</label><b>${signed(drv.basisPts / 100)}% ${basisWord}</b></div>
     </div>
     <div class="tile">
-      <h4>Options ${srcTag}</h4>
+      <h4>Options ${optTag}</h4>
       <div class="kv"><label>Max pain strike</label><b>${fmtIN0.format(drv.maxPain)}</b></div>
       <div class="kv"><label>Put/Call ratio (OI)</label><b>${drv.pcr.toFixed(2)}</b></div>
       <div class="kv"><label>ATM implied volatility</label><b>${drv.iv.toFixed(1)}%</b></div>
@@ -974,7 +1235,11 @@ function renderDeep(inst, q, drv, pred, sess) {
      market settles near the max-pain strike, so heavy open interest acts like a magnet — strongest close to
      expiry), and the <b>futures signal</b> (a futures price above its cost-of-carry fair value means traders
      are paying up to be long). The ± range is the move implied by ATM option prices, shrunk by how much of
-     the session is left. ${state.source === "live" ? "Prices are live; derivatives figures are modeled from them because exchanges do not provide a free browser-accessible F&O feed." : "In demo mode everything, including derivatives, is simulated — the mechanics are identical with live data."}`;
+     the session is left. ${!drv.modeled
+       ? "Futures and options figures come straight from NSE's official option chain via the local proxy."
+       : state.source !== "demo"
+         ? "Prices are live; derivatives figures are modeled from them. Run the app through <b>server.js</b> to pull the real option chain from NSE's official site."
+         : "In demo mode everything, including derivatives, is simulated — the mechanics are identical with live data."}`;
 }
 
 /* ---------- constituents table ---------- */
@@ -1003,7 +1268,7 @@ function renderTable(sessArg) {
   for (const sym of universe) {
     const inst = instrumentFor(sym);
     const q = quoteFor(inst, sess);
-    const drv = simDerivatives(inst, q.last, q.prevClose);
+    const drv = getDerivatives(inst, q.last, q.prevClose, false);
     const pred = predictClose(inst, q, drv, sess);
     rows.push({ sym, inst, q, pred,
       price: q.last, chg: (q.last - q.prevClose) / q.prevClose * 100,
@@ -1034,6 +1299,7 @@ function renderTable(sessArg) {
 function selectSymbol(sym) {
   state.selected = sym;
   render();
+  if (state.source === "nse") hydrateSelected();
   window.scrollTo({ top: 0, behavior: "smooth" });
 }
 
@@ -1051,7 +1317,7 @@ function addCustomSymbol(raw) {
     });
   }
   selectSymbol(sym);
-  if (state.source === "live") {
+  if (state.source === "yahoo") {
     fetchYahoo(instrumentFor(sym)).then(q => {
       if (q) { state.liveQuotes.set(sym, q); if (state.selected === sym) render(); else renderTable(); }
     });
@@ -1120,7 +1386,7 @@ bindChartHover();
 render();
 tryGoLive();
 setInterval(render, 30000);
-setInterval(() => { if (state.source === "live" && !document.hidden) tryGoLive(); }, 5 * 60 * 1000);
+setInterval(refreshLive, 60000);
 </script>
 </body>
 </html>
